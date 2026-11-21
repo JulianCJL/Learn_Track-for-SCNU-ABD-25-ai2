@@ -153,13 +153,23 @@ class LearnTrackCLI:
         if not tasks:
             print("No tasks to show.")
             return
-        print("\nID       Due date    P  Status       Course              Title")
-        print("-" * 78)
+        # Column widths follow the identifiers and course names that TaskManager
+        # actually supplies, so the manager's 32-character UUIDs stay aligned.
+        id_width = max(8, *(len(task.task_id) for task in tasks))
+        due_width = max(11, *(len(task.due_date or "No date") for task in tasks))
+        course_width = min(max(18, *(len(task.course) for task in tasks)), 28)
+        header = (
+            f"{'ID':<{id_width}} {'Due date':<{due_width}} {'P':<2} "
+            f"{'Status':<12} {'Course':<{course_width}} Title"
+        )
+        print(f"\n{header}")
+        print("-" * len(header))
         for task in tasks:
             due = task.due_date or "No date"
             print(
-                f"{task.task_id:<8} {due:<11} {task.priority:<2} "
-                f"{task.status:<12} {task.course[:18]:<18} {task.title}"
+                f"{task.task_id:<{id_width}} {due:<{due_width}} "
+                f"{task.priority:<2} {task.status:<12} "
+                f"{task.course[:course_width]:<{course_width}} {task.title}"
             )
 
     @staticmethod
@@ -251,3 +261,10 @@ def run_cli(task_manager: TaskManagerPort) -> None:
         LearnTrackCLI(task_manager).run()
     except (EOFError, KeyboardInterrupt):
         print("\nLearnTrack closed.")
+
+
+if __name__ == "__main__":
+    # Runs the whole prototype from this package: storage-backed manager + CLI.
+    from json_storage_fixed import create_manager
+
+    run_cli(create_manager())
