@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.idea/
+tasks.json
+tasks_conflict_*.json
+*_corrupt_*.json
