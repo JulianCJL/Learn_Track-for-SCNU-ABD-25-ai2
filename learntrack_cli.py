@@ -7,11 +7,22 @@ statistics. See README.md for the small interface this CLI expects.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Any, Protocol
+from unicodedata import east_asian_width
 
 
 STATUSES = ("To Do", "In Progress", "Completed")
+
+# BUG-04: a Chinese IME produces "，", not ",". Accept both (and keep the ASCII
+# form working) so typing "读课本，做题" really creates two subtasks.
+SUBTASK_SEPARATORS = re.compile(r"[,，]")
+
+
+def split_subtasks(text: str) -> list[str]:
+    """Split a subtask line on ASCII or full-width commas, dropping blanks."""
+    return [item.strip() for item in SUBTASK_SEPARATORS.split(text) if item.strip()]
 
 
 class TaskRecord(Protocol):
@@ -100,8 +111,8 @@ class LearnTrackCLI:
         course = self._non_empty("Course: ")
         due_date = self._date_input("Due date (YYYY-MM-DD, blank for none): ", allow_blank=True)
         priority = self._priority_input()
-        subtasks_text = input("Subtasks (comma-separated, blank for none): ").strip()
-        subtasks = [item.strip() for item in subtasks_text.split(",") if item.strip()]
+        subtasks = split_subtasks(
+            input("Subtasks (comma-separated, blank for none): ").strip())
         task = self.manager.add_task(title, course, due_date, priority, subtasks)
         print(f"Added task {task.task_id}: {task.title}")
 
@@ -125,7 +136,7 @@ class LearnTrackCLI:
             updates = {"status": self._status_input()}
         else:
             text = input("New subtasks (comma-separated, blank to clear): ").strip()
-            updates = {"subtasks": [item.strip() for item in text.split(",") if item.strip()]}
+            updates = {"subtasks": split_subtasks(text)}
         updated = self.manager.update_task(task.task_id, **updates)
         print(f"Updated task {updated.task_id}.")
 
@@ -149,28 +160,59 @@ class LearnTrackCLI:
             results = self.manager.filter_tasks(overdue_only=True)
         self._list_tasks(results)
 
+    # ------------------------------------------------------- display width (BUG-03)
+    @staticmethod
+    def _cells(text: str) -> int:
+        """Terminal cells of ``text``; East-Asian wide/full-width chars take two."""
+        return sum(2 if east_asian_width(char) in "WF" else 1 for char in text)
+
+    @classmethod
+    def _pad(cls, text: str, width: int) -> str:
+        """Pad to ``width`` terminal cells."""
+        return text + " " * max(0, width - cls._cells(text))
+
+    @classmethod
+    def _fit(cls, text: str, width: int) -> str:
+        """Truncate ``text`` to at most ``width`` terminal cells."""
+        if cls._cells(text) <= width:
+            return text
+        kept = 0
+        for index, char in enumerate(text):
+            kept += 2 if east_asian_width(char) in "WF" else 1
+            if kept > width:
+                return text[:index]
+        return text
+
     def _list_tasks(self, tasks: list[TaskRecord]) -> None:
         if not tasks:
             print("No tasks to show.")
             return
-        # Column widths follow the identifiers and course names that TaskManager
-        # actually supplies, so the manager's 32-character UUIDs stay aligned.
-        id_width = max(8, *(len(task.task_id) for task in tasks))
-        due_width = max(11, *(len(task.due_date or "No date") for task in tasks))
-        course_width = min(max(18, *(len(task.course) for task in tasks)), 28)
-        header = (
-            f"{'ID':<{id_width}} {'Due date':<{due_width}} {'P':<2} "
-            f"{'Status':<12} {'Course':<{course_width}} Title"
-        )
+        # Widths follow the identifiers and course names that TaskManager
+        # actually supplies (so its 32-character UUIDs stay aligned) and are
+        # measured in terminal cells, so CJK courses keep the columns straight.
+        id_width = max(8, *(self._cells(task.task_id) for task in tasks))
+        due_width = max(11, *(self._cells(task.due_date or "No date") for task in tasks))
+        course_width = min(max(18, *(self._cells(task.course) for task in tasks)), 28)
+        header = " ".join((
+            self._pad("ID", id_width),
+            self._pad("Due date", due_width),
+            self._pad("P", 2),
+            self._pad("Status", 12),
+            self._pad("Course", course_width),
+            "Title",
+        ))
         print(f"\n{header}")
-        print("-" * len(header))
+        print("-" * self._cells(header))
         for task in tasks:
             due = task.due_date or "No date"
-            print(
-                f"{task.task_id:<{id_width}} {due:<{due_width}} "
-                f"{task.priority:<2} {task.status:<12} "
-                f"{task.course[:course_width]:<{course_width}} {task.title}"
-            )
+            print(" ".join((
+                self._pad(task.task_id, id_width),
+                self._pad(due, due_width),
+                self._pad(str(task.priority), 2),
+                self._pad(task.status, 12),
+                self._pad(self._fit(task.course, course_width), course_width),
+                task.title,
+            )))
 
     @staticmethod
     def _print_details(task: TaskRecord) -> None:
@@ -231,14 +273,20 @@ class LearnTrackCLI:
     def _priority_input() -> int:
         while True:
             value = input("Priority (1 highest - 4 lowest): ").strip()
-            if value.isdigit() and int(value) in {1, 2, 3, 4}:
+            # BUG-02: isdigit() is True for "²" but int("²") raises ValueError.
+            # isdecimal() only accepts characters int() can actually convert.
+            if value.isdecimal() and int(value) in {1, 2, 3, 4}:
                 return int(value)
             print("Priority must be 1, 2, 3, or 4.")
 
     @staticmethod
     def _status_input() -> str:
-        print("1. To Do  2. In Progress  3. Completed")
-        choice_to_status = {"1": "To Do", "2": "In Progress", "3": "Completed"}
+        # Keep the menu, the mapping and the STATUSES constant in one place so
+        # the three can never drift apart (Task.STATUSES carries the same values).
+        labels = ("1", "2", "3")
+        choice_to_status = dict(zip(labels, STATUSES))
+        print("  ".join(f"{key}. {STATUSES[index]}"
+                        for index, key in enumerate(labels)))
         while True:
             value = input("Status: ").strip()
             if value in choice_to_status:
@@ -265,6 +313,13 @@ def run_cli(task_manager: TaskManagerPort) -> None:
 
 if __name__ == "__main__":
     # Runs the whole prototype from this package: storage-backed manager + CLI.
-    from json_storage_fixed import create_manager
+    from json_storage import create_manager
 
-    run_cli(create_manager())
+    # BUG-05: an unreadable tasks.json must not surface as a raw traceback.
+    try:
+        manager = create_manager()
+    except OSError as exc:
+        print(f"LearnTrack cannot start: the task file is unreadable ({exc})")
+        print("Close the program holding it, or fix/remove tasks.json, then retry.")
+        raise SystemExit(1)
+    run_cli(manager)
