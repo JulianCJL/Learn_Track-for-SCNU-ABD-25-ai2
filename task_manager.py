@@ -1,7 +1,9 @@
-"""In-memory LearnTrack business layer matching learntrack_cli.TaskManagerPort.
+"""In-memory business layer for LearnTrack, matching the CLI manager protocol.
 
-Pass restored Task objects to TaskManager(tasks). Storage can serialize the
-snapshots returned by get_tasks(). This module performs no file I/O.
+Tasks are kept in a dictionary keyed by task ID. Every task handed back to a
+caller is an independent snapshot, so in-place edits cannot corrupt the
+store. This module performs no file I/O; the storage layer serializes the
+snapshots returned by :meth:`get_tasks`.
 """
 from __future__ import annotations
 
@@ -13,12 +15,7 @@ from task import Task
 
 
 class TaskManager:
-    """Manage validated tasks; returned tasks are independent snapshots.
-
-    Lists sort by deadline (undated last), priority (1 highest), then ID.
-    Overdue means a deadline before today and a status other than Completed.
-    Course and status filters use exact matches and combine with AND.
-    """
+    """Validate and coordinate the stored tasks."""
 
     def __init__(self, tasks: Iterable[Task] | None = None) -> None:
         self._tasks: dict[str, Task] = {}
@@ -57,6 +54,7 @@ class TaskManager:
         return self._copy(self._find(task_id))
 
     def get_tasks(self) -> list[Task]:
+        """List tasks ordered by deadline (undated last), priority, then ID."""
         ordered = sorted(self._tasks.values(), key=lambda task: (
             not bool(task.due_date), task.due_date, task.priority, task.task_id
         ))
@@ -87,6 +85,7 @@ class TaskManager:
         self, course: str | None = None, status: str | None = None,
         overdue_only: bool = False,
     ) -> list[Task]:
+        """Filter by exact course, exact status, and/or overdue state (AND)."""
         if course is not None:
             Task._check("course", course)
         if status is not None:
@@ -100,6 +99,7 @@ class TaskManager:
                 and (not overdue_only or self._overdue(task, today))]
 
     def statistics(self) -> dict[str, int | float]:
+        """Return counts by status, overdue count, and completion rate."""
         tasks = list(self._tasks.values())
         total = len(tasks)
         completed = sum(task.status == "Completed" for task in tasks)

@@ -1,9 +1,13 @@
-"""LearnTrack task entity (Python 3.10+, standard library only).
+"""Task entity for LearnTrack (Python 3.10+, standard library only).
 
-TaskManager supplies task_id and owns ID uniqueness. Dates use YYYY-MM-DD,
-with an empty string meaning no deadline. Priority 1 is highest, 4 lowest.
-Storage can use to_dict()/from_dict() or to_json()/from_json().
-All validation failures raise ValueError, matching the CLI error boundary.
+A Task carries the seven protocol fields used by the business layer and the
+JSON storage layer. The manager supplies ``task_id`` and keeps IDs unique.
+Dates use ``YYYY-MM-DD``; an empty string means no deadline. Priority 1 is
+the highest level and 4 the lowest.
+
+Field validation runs on assignment and again before serialization. Any
+invalid value raises ``ValueError`` so the CLI can surface it as an action
+error.
 """
 from __future__ import annotations
 
@@ -15,13 +19,7 @@ from typing import Any, ClassVar
 
 @dataclass
 class Task:
-    """TaskRecord-compatible entity; no UI, storage, or manager dependencies.
-
-    Assignments are validated before changing a field. Subtask lists are copied
-    on assignment and export. In-place list edits are checked by validate() and
-    again before serialization; callers should assign a new list for immediate
-    validation of edits.
-    """
+    """A single learning task, independent of any UI or storage code."""
 
     STATUSES: ClassVar[tuple[str, ...]] = ("To Do", "In Progress", "Completed")
 
@@ -35,6 +33,7 @@ class Task:
 
     @staticmethod
     def _check(name: str, value: Any) -> None:
+        """Validate one field; raise ``ValueError`` when it does not fit."""
         if name in ("task_id", "title", "course"):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} must be a non-empty string")
@@ -65,7 +64,7 @@ class Task:
         object.__setattr__(self, name, value)
 
     def validate(self) -> None:
-        """Check all fields, including any in-place edits to subtasks."""
+        """Re-check every field, including any in-place edit of subtasks."""
         for item in fields(self):
             self._check(item.name, getattr(self, item.name))
 
@@ -89,12 +88,12 @@ class Task:
         return cls(**data)
 
     def to_json(self, *, indent: int | None = None) -> str:
-        """Serialize with readable Unicode; does not write any files."""
+        """Serialize to a JSON string; this method writes no files."""
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)
 
     @classmethod
     def from_json(cls, text: str) -> Task:
-        """Restore from a JSON object, applying the same field validation."""
+        """Restore a task from a JSON object, applying the same validation."""
         if not isinstance(text, str):
             raise ValueError("JSON input must be a string")
         return cls.from_dict(json.loads(text))

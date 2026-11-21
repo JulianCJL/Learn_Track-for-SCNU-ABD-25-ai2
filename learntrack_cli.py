@@ -1,8 +1,9 @@
-"""LearnTrack CLI and input validation contribution.
+"""LearnTrack command-line interface and input validation.
 
-This module owns the menu and user input only. The team's Task and TaskManager
-modules remain responsible for task data, persistence, CRUD, filtering, and
-statistics. See README.md for the small interface this CLI expects.
+This module owns the menu and user input only. Task data, persistence, CRUD,
+filtering, and statistics stay in the manager implementation passed to
+:func:`run_cli`. The expected interface is documented by ``TaskManagerPort``
+and ``TaskRecord`` below.
 """
 
 from __future__ import annotations
@@ -15,8 +16,7 @@ from unicodedata import east_asian_width
 
 STATUSES = ("To Do", "In Progress", "Completed")
 
-# BUG-04: a Chinese IME produces "，", not ",". Accept both (and keep the ASCII
-# form working) so typing "读课本，做题" really creates two subtasks.
+# Accept both ASCII and full-width commas so IME input splits subtasks too.
 SUBTASK_SEPARATORS = re.compile(r"[,，]")
 
 
@@ -36,7 +36,7 @@ class TaskRecord(Protocol):
 
 
 class TaskManagerPort(Protocol):
-    """Interface expected from the group's TaskManager implementation."""
+    """Interface expected from the manager implementation."""
 
     def add_task(
         self,
@@ -66,7 +66,7 @@ class TaskManagerPort(Protocol):
 
 
 class LearnTrackCLI:
-    """Menu and input validation layer; delegates all task work to TaskManager."""
+    """Menu and input validation layer; delegates task work to the manager."""
 
     def __init__(self, manager: TaskManagerPort) -> None:
         self.manager = manager
@@ -114,13 +114,23 @@ class LearnTrackCLI:
         subtasks = split_subtasks(
             input("Subtasks (comma-separated, blank for none): ").strip())
         task = self.manager.add_task(title, course, due_date, priority, subtasks)
-        print(f"Added task {task.task_id}: {task.title}")
+        if getattr(self.manager, "last_save_failed", False):
+            print(f"Task '{task.title}' is kept in memory but could not be saved; "
+                  "check the task file permissions and retry.")
+        else:
+            print(f"Added task {task.task_id}: {task.title}")
 
     def _view_task(self) -> None:
-        self._print_details(self.manager.get_task(self._task_id_input()))
+        task_id = self._task_id_input()
+        if task_id is None:
+            return
+        self._print_details(self.manager.get_task(task_id))
 
     def _update_task(self) -> None:
-        task = self.manager.get_task(self._task_id_input())
+        task_id = self._task_id_input()
+        if task_id is None:
+            return
+        task = self.manager.get_task(task_id)
         print(f"Updating {task.title} ({task.task_id})")
         print("1. Title  2. Course  3. Due date  4. Priority  5. Status  6. Subtasks")
         field_choice = self._choice("Choose a field: ", {"1", "2", "3", "4", "5", "6"})
@@ -138,14 +148,23 @@ class LearnTrackCLI:
             text = input("New subtasks (comma-separated, blank to clear): ").strip()
             updates = {"subtasks": split_subtasks(text)}
         updated = self.manager.update_task(task.task_id, **updates)
-        print(f"Updated task {updated.task_id}.")
+        if getattr(self.manager, "last_save_failed", False):
+            print("Update is kept in memory but could not be saved.")
+        else:
+            print(f"Updated task {updated.task_id}.")
 
     def _delete_task(self) -> None:
-        task = self.manager.get_task(self._task_id_input())
+        task_id = self._task_id_input()
+        if task_id is None:
+            return
+        task = self.manager.get_task(task_id)
         answer = input(f"Delete '{task.title}'? (y/N): ").strip().casefold()
         if answer == "y":
             self.manager.delete_task(task.task_id)
-            print("Task deleted.")
+            if getattr(self.manager, "last_save_failed", False):
+                print("Deletion is kept in memory but could not be saved.")
+            else:
+                print("Task deleted.")
         else:
             print("Delete cancelled.")
 
@@ -160,7 +179,8 @@ class LearnTrackCLI:
             results = self.manager.filter_tasks(overdue_only=True)
         self._list_tasks(results)
 
-    # ------------------------------------------------------- display width (BUG-03)
+    # ------------------------------------------------------- display width
+
     @staticmethod
     def _cells(text: str) -> int:
         """Terminal cells of ``text``; East-Asian wide/full-width chars take two."""
@@ -187,9 +207,9 @@ class LearnTrackCLI:
         if not tasks:
             print("No tasks to show.")
             return
-        # Widths follow the identifiers and course names that TaskManager
-        # actually supplies (so its 32-character UUIDs stay aligned) and are
-        # measured in terminal cells, so CJK courses keep the columns straight.
+        # Widths follow the identifiers and course names the manager supplies
+        # and are measured in terminal cells, so CJK courses keep the columns
+        # aligned.
         id_width = max(8, *(self._cells(task.task_id) for task in tasks))
         due_width = max(11, *(self._cells(task.due_date or "No date") for task in tasks))
         course_width = min(max(18, *(self._cells(task.course) for task in tasks)), 28)
@@ -273,16 +293,16 @@ class LearnTrackCLI:
     def _priority_input() -> int:
         while True:
             value = input("Priority (1 highest - 4 lowest): ").strip()
-            # BUG-02: isdigit() is True for "²" but int("²") raises ValueError.
-            # isdecimal() only accepts characters int() can actually convert.
+            # isdecimal() accepts only characters int() can convert, so
+            # superscript digits such as "²" are rejected here.
             if value.isdecimal() and int(value) in {1, 2, 3, 4}:
                 return int(value)
             print("Priority must be 1, 2, 3, or 4.")
 
     @staticmethod
     def _status_input() -> str:
-        # Keep the menu, the mapping and the STATUSES constant in one place so
-        # the three can never drift apart (Task.STATUSES carries the same values).
+        # Derive both the legend and the mapping from STATUSES so they cannot
+        # drift apart.
         labels = ("1", "2", "3")
         choice_to_status = dict(zip(labels, STATUSES))
         print("  ".join(f"{key}. {STATUSES[index]}"
@@ -293,9 +313,12 @@ class LearnTrackCLI:
                 return choice_to_status[value]
             print("Choose 1, 2, or 3.")
 
-    def _task_id_input(self) -> str:
+    def _task_id_input(self) -> str | None:
+        """Prompt for a task ID; return None when the user cancels with 0."""
         while True:
-            task_id = input("Task ID: ").strip()
+            task_id = input("Task ID (0 to return): ").strip()
+            if task_id == "0":
+                return None
             try:
                 self.manager.get_task(task_id)
                 return task_id
@@ -304,7 +327,7 @@ class LearnTrackCLI:
 
 
 def run_cli(task_manager: TaskManagerPort) -> None:
-    """Entry point called by the team's application after it builds TaskManager."""
+    """Entry point called by the application after it builds the manager."""
     try:
         LearnTrackCLI(task_manager).run()
     except (EOFError, KeyboardInterrupt):
@@ -312,10 +335,10 @@ def run_cli(task_manager: TaskManagerPort) -> None:
 
 
 if __name__ == "__main__":
-    # Runs the whole prototype from this package: storage-backed manager + CLI.
     from json_storage import create_manager
 
-    # BUG-05: an unreadable tasks.json must not surface as a raw traceback.
+    # An unreadable store must produce a friendly message and exit code
+    # instead of surfacing a raw traceback.
     try:
         manager = create_manager()
     except OSError as exc:
