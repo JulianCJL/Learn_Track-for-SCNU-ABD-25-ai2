@@ -16,12 +16,15 @@ from unicodedata import east_asian_width
 
 STATUSES = ("To Do", "In Progress", "Completed")
 
-# Accept both ASCII and full-width commas so IME input splits subtasks too.
-SUBTASK_SEPARATORS = re.compile(r"[,，]")
+# Accept ASCII/full-width commas, the ideographic comma, and semicolons so
+# common IME input splits subtasks too.
+SUBTASK_SEPARATORS = re.compile(r"[,，、；;]")
+
+TITLE_WIDTH = 40
 
 
 def split_subtasks(text: str) -> list[str]:
-    """Split a subtask line on ASCII or full-width commas, dropping blanks."""
+    """Split a subtask line on commas and semicolons, dropping blanks."""
     return [item.strip() for item in SUBTASK_SEPARATORS.split(text) if item.strip()]
 
 
@@ -193,15 +196,22 @@ class LearnTrackCLI:
 
     @classmethod
     def _fit(cls, text: str, width: int) -> str:
-        """Truncate ``text`` to at most ``width`` terminal cells."""
+        """Truncate ``text`` to at most ``width`` terminal cells with an ellipsis."""
+        if width <= 0:
+            return ""
         if cls._cells(text) <= width:
             return text
+        ellipsis = "…"
+        budget = width - cls._cells(ellipsis)
+        if budget <= 0:
+            return ellipsis[:width]
         kept = 0
         for index, char in enumerate(text):
-            kept += 2 if east_asian_width(char) in "WF" else 1
-            if kept > width:
-                return text[:index]
-        return text
+            char_cells = 2 if east_asian_width(char) in "WF" else 1
+            if kept + char_cells > budget:
+                return text[:index] + ellipsis
+            kept += char_cells
+        return text + ellipsis
 
     def _list_tasks(self, tasks: list[TaskRecord]) -> None:
         if not tasks:
@@ -231,7 +241,7 @@ class LearnTrackCLI:
                 self._pad(str(task.priority), 2),
                 self._pad(task.status, 12),
                 self._pad(self._fit(task.course, course_width), course_width),
-                task.title,
+                self._fit(task.title, TITLE_WIDTH),
             )))
 
     @staticmethod

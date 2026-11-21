@@ -33,7 +33,8 @@ The prototype targets the following goals:
   filters combine with AND.
 - **Statistics:** total tasks, counts by status, overdue count, and completion
   rate.
-- **Subtask input:** subtasks are split on ASCII commas and full-width commas.
+- **Subtask input:** subtasks are split on ASCII/full-width commas, ideographic
+  commas, and semicolons.
 - **Local persistence:** tasks are stored in `tasks.json` in the working
   directory and survive program restarts.
 - **Input validation:** invalid input is rejected with a message and the prompt
