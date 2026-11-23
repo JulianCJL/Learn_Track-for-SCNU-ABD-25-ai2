@@ -1,9 +1,17 @@
 # LearnTrack — Personal Learning Task Manager
 
-LearnTrack is a lightweight command-line prototype that helps university students
-keep all coursework tasks in one place. It records task titles, courses, due
-dates, priorities, progress status, and subtasks; supports listing, filtering,
-and progress statistics; and persists the data to a local JSON file.
+LearnTrack is a lightweight desktop application, built with PySide6, that helps
+university students keep all coursework tasks in one place; a command-line
+companion ships in the same folder. It records task titles, courses, due dates,
+priorities, progress status, and subtasks; supports listing, filtering, sorting,
+searching, and progress statistics; and persists the data to a local JSON file.
+The interface, source code, and documentation are in English throughout.
+
+![LearnTrack desktop UI](screenshot.png)
+
+*A sample board: summary cards on the left, task cards with priority and status
+chips in the middle, and the selected task's detail and subtask list on the
+right.*
 
 ## 1. Background and goals
 
@@ -24,33 +32,42 @@ The prototype targets the following goals:
 ## 2. Features
 
 - **Task management:** add, view, list, update, and delete tasks.
+- **Desktop board:** summary cards, a card list with priority and status chips,
+  a detail pane with the full subtask list, and in-app search, sorting, and
+  filtering; a light/dark theme switch is included.
 - **Task fields:** title, course, due date (`YYYY-MM-DD`, optional), priority
   (1 highest – 4 lowest), status (`To Do`, `In Progress`, `Completed`), and a
   subtask list.
 - **List ordering:** deadlines ascending, undated tasks last, then priority,
-  then task ID.
+  then task ID. The desktop UI can re-sort by priority, course, or title.
 - **Filters:** exact course match, exact status match, and overdue-only view;
   filters combine with AND.
+- **Search:** the desktop UI searches titles, courses, and subtask text
+  case-insensitively as you type.
 - **Statistics:** total tasks, counts by status, overdue count, and completion
-  rate.
+  rate; the desktop UI also draws a completion bar.
 - **Subtask input:** subtasks are split on ASCII/full-width commas, ideographic
   commas, and semicolons.
-- **Local persistence:** tasks are stored in `tasks.json` in the working
-  directory and survive program restarts.
+- **Local persistence:** tasks are stored in `tasks.json` next to the program
+  and survive restarts.
 - **Input validation:** invalid input is rejected with a message and the prompt
   repeats; `ValueError` errors from the task layer are shown as action errors
-  instead of terminating the menu.
+  instead of terminating the interface. The desktop dialog validates the form
+  before saving and reports write failures without pretending they succeeded.
 
 ## 3. Architecture
 
 The program follows a layered design. Each layer depends only on the layer
-below it, and the CLI does not manipulate task data or files directly.
+below it; neither interface manipulates task data or files directly.
 
 | Module | Responsibility |
 |---|---|
 | `task.py` | Task entity, field validation, and dictionary/JSON serialization. |
 | `task_manager.py` | In-memory business layer: CRUD, ordering, filtering, and statistics. Returns independent snapshots so callers cannot corrupt the store. |
 | `json_storage.py` | JSON persistence: load and save tasks, corruption recovery, backup copies, and the storage-backed manager. |
+| `ui_theme.py` | Colour palettes, the Qt stylesheet, and generated icon/caret assets. |
+| `ui_widgets.py` | Task list model, card delegate, summary cards, toast, empty state, and the task dialog. |
+| `learntrack_ui.py` | Desktop entry point: window layout, filters, search, sorting, theme switching, and shortcuts. |
 | `learntrack_cli.py` | Menu and input validation. Delegates all task operations to the manager through the `TaskManagerPort` / `TaskRecord` interface. |
 | `verify_bug_fixes.py` | Self-contained regression checks for the storage layer and CLI flows. |
 
@@ -68,9 +85,21 @@ below it, and the CLI does not manipulate task data or files directly.
 
 ## 4. Running the program
 
-- **Requirements:** Python 3.10 or later; the standard library only, no
-  third-party packages.
-- **Windows launcher:** double-click `StartLearnTrack.bat`. The launcher runs
+- **Requirements:** Python 3.10 or later. The CLI and storage layers use the
+  standard library only; the desktop UI additionally needs PySide6
+  (`pip install PySide6`), and rebuilding the executable needs PyInstaller.
+- **Desktop application (recommended):** double-click `LearnTrack.exe`. The
+  window opens without a console. `tasks.json` is kept next to the executable;
+  if that folder is read-only, the program falls back to
+  `%USERPROFILE%\LearnTrack\tasks.json` and shows the active path in the status
+  bar.
+- **Desktop UI from source:**
+
+  ```bash
+  python learntrack_ui.py
+  ```
+
+- **Windows CLI launcher:** double-click `StartLearnTrack.bat`. The launcher runs
   the program from its own folder so `tasks.json` is created next to the code,
   and keeps the window open after exit.
 - **Command line:**
@@ -78,6 +107,49 @@ below it, and the CLI does not manipulate task data or files directly.
   ```bash
   python learntrack_cli.py
   ```
+
+### Moving the program between computers
+
+The shipped `LearnTrack.exe` is a single self-contained Windows executable: the
+icon, stylesheet, and drag handles are bundled inside it, so the project folder
+can be zipped and unpacked anywhere on Windows without reinstalling Python or
+PySide6.
+
+- Extract the archive to any **writable** folder, for example `Documents`,
+  `Desktop`, or a dedicated course folder. Avoid read-only locations such as
+  `C:\Program Files` or `C:\Windows`.
+- Paths may contain spaces. Keep the archive name and folder names in English to
+  avoid encoding problems in some unzip tools.
+- On first launch Windows may show a SmartScreen warning because the executable
+  is not code-signed; choose *More info → Run anyway*.
+- Task data follows the executable: `tasks.json` is created beside it, and when
+  that folder cannot be written the program stores its data under
+  `%USERPROFILE%\LearnTrack\tasks.json` instead, showing the active path in the
+  status bar.
+- The executable is built for Windows only. It does not run on macOS or Linux;
+  on those systems use `python learntrack_ui.py` from the same folder.
+
+### Desktop shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+N` | Create a task |
+| `Ctrl+F` | Focus the search box |
+| `Ctrl+R` | Reload `tasks.json` from disk |
+| `F2` / double-click | Edit the selected task |
+| `Delete` | Delete the selected task (ignored while typing in a text field) |
+
+### Building the executable
+
+Double-click `build_exe.bat`; it calls PyInstaller with the same options used for
+the shipped build (one file, windowed, icon and assets bundled) and writes
+`LearnTrack.exe` into this folder. The equivalent command is:
+
+```bash
+python -m PyInstaller --onefile --windowed --name LearnTrack \
+  --icon assets/learn_track.ico --add-data "assets;assets" \
+  learntrack_ui.py
+```
 
 ### Menu reference
 
@@ -155,8 +227,9 @@ On the task ID prompt, enter `0` to return to the main menu.
 - There is no multi-user mode or true merge of concurrent writes; the other
   instance's version is preserved as a conflict snapshot instead of being
   merged.
-- Course and status filters are exact, case-sensitive matches; there is no
-  free-text search.
+- The CLI filters are exact, case-sensitive matches. The desktop UI adds
+  case-insensitive search over titles, courses, and subtasks, but its course and
+  status filters remain exact.
 - Tasks are identified by a 32-character hexadecimal ID; short serial-number
   selection could be added to simplify manual entry.
 - This is a single-user local prototype, with no authentication or cloud sync.

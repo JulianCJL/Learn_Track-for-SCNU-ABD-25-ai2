@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
+build/
 .idea/
 tasks.json
 tasks_conflict_*.json
 *_corrupt_*.json
+learntrack_error.log

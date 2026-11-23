@@ -18,7 +18,7 @@ STATUSES = ("To Do", "In Progress", "Completed")
 
 # Accept ASCII/full-width commas, the ideographic comma, and semicolons so
 # common IME input splits subtasks too.
-SUBTASK_SEPARATORS = re.compile(r"[,，、；;]")
+SUBTASK_SEPARATORS = re.compile("[,;\uFF0C\uFF1B\u3001]")
 
 TITLE_WIDTH = 40
 

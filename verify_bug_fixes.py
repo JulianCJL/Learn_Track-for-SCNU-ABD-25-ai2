@@ -87,33 +87,42 @@ def check_unicode_priority(root: Path) -> None:
            f"rejected={rejected}, no_crash={no_crash}, saved={saved}")
 
 
-def check_cjk_alignment(root: Path) -> None:
-    """CJK course names must keep the Title column aligned."""
-    manager = create_manager(root / "cjk" / "tasks.json")
-    session(manager, ["1", "CJK course task", "软件工程", "2026-12-10", "1", "", "0"])
-    session(manager, ["1", "Long CJK course", "计算机科学与技术学院软件工程导论课程", "", "2", "", "0"])
+def wide(text: str) -> str:
+    """Return ``text`` in full-width Latin forms, which occupy two terminal cells."""
+    return "".join(chr(ord(char) + 0xFEE0) if 0x21 <= ord(char) <= 0x7E else char
+                   for char in text)
+
+
+def check_wide_alignment(root: Path) -> None:
+    """Two-cell characters must not knock the Title column out of alignment."""
+    manager = create_manager(root / "wide" / "tasks.json")
+    session(manager, ["1", "Wide course task", wide("FULLWIDTH COURSE"),
+                      "2026-12-10", "1", "", "0"])
+    session(manager, ["1", "Long wide course",
+                      wide("FULLWIDTH COURSE NAME USED FOR ALIGNMENT TEST"),
+                      "", "2", "", "0"])
     session(manager, ["1", "Ascii course task", "Software Engineering", "2026-12-11", "2", "", "0"])
     output, _ = session(manager, ["2", "0"])
     header = next(line for line in output.splitlines() if line.startswith("ID"))
     target = cells(header[:header.index("Title")])
     aligned = True
-    for title in ("CJK course task", "Long CJK course", "Ascii course task"):
+    for title in ("Wide course task", "Long wide course", "Ascii course task"):
         row = next(line for line in output.splitlines() if title in line)
         aligned &= cells(row[:row.index(title)]) == target
-    record("CJK course names keep columns aligned", aligned, f"title_column={target}")
+    record("Wide course names keep columns aligned", aligned, f"title_column={target}")
 
 
 def check_fullwidth_comma(root: Path) -> None:
-    """Full-width commas must split subtasks, in add and in update."""
-    pure = (split_subtasks("读课本，做题，复习") == ["读课本", "做题", "复习"]
+    """Full-width commas must split subtasks, both on add and on update."""
+    pure = (split_subtasks("Read chapter\uFF0CTake notes\uFF0CReview") == ["Read chapter", "Take notes", "Review"]
             and split_subtasks("A,B") == ["A", "B"]
-            and split_subtasks("A，B,C") == ["A", "B", "C"]
+            and split_subtasks("A\uFF0CB,C") == ["A", "B", "C"]
             and split_subtasks("") == [])
     manager = create_manager(root / "comma" / "tasks.json")
-    session(manager, ["1", "分隔符", "SE", "", "3", "读课本，做题，复习", "0"])
-    added = manager.get_tasks()[0].subtasks == ["读课本", "做题", "复习"]
-    session(manager, ["4", manager.get_tasks()[0].task_id, "6", "第一章，第二章", "0"])
-    updated = manager.get_tasks()[0].subtasks == ["第一章", "第二章"]
+    session(manager, ["1", "Separators", "SE", "", "3", "Read chapter\uFF0CTake notes\uFF0CReview", "0"])
+    added = manager.get_tasks()[0].subtasks == ["Read chapter", "Take notes", "Review"]
+    session(manager, ["4", manager.get_tasks()[0].task_id, "6", "Chapter one\uFF0CChapter two", "0"])
+    updated = manager.get_tasks()[0].subtasks == ["Chapter one", "Chapter two"]
     record("Full-width commas split subtasks", pure and added and updated,
            f"pure={pure}, add={added}, update={updated}")
 
@@ -180,7 +189,7 @@ def main() -> int:
         root = Path(tmp)
         check_bom_loading(root)
         check_unicode_priority(root)
-        check_cjk_alignment(root)
+        check_wide_alignment(root)
         check_fullwidth_comma(root)
         check_unreadable_store(root)
         check_concurrent_instance(root)
